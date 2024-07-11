@@ -36,26 +36,53 @@ def get_s3_client():
     )
 
 def list_folders(request):
-    print("AWS_ACCESS_KEY_ID:", os.getenv('AWS_ACCESS_KEY_ID'))
-    print("AWS_SECRET_ACCESS_KEY:", os.getenv('AWS_SECRET_ACCESS_KEY'))
-    print("AWS_STORAGE_BUCKET_NAME:", os.getenv('AWS_STORAGE_BUCKET_NAME'))
-    print("AWS_DEFAULT_REGION:", os.getenv('AWS_DEFAULT_REGION'))
     s3_client=get_s3_client()
-    print(s3_client)
     
     bucket_name = os.getenv('AWS_STORAGE_BUCKET_NAME')
     
     try:
-        print("abs")
         response = s3_client.list_objects_v2(Bucket=bucket_name, Delimiter='/')
-        print(response)
+        # print(response)
         folders = []
+        files= []
+        
         for common_prefix in response.get('CommonPrefixes', []):
-         folders.append(common_prefix['Prefix'])
+            prefix = common_prefix['Prefix']
+            subdirectory_info = {
+                'Prefix': prefix,
+                'FileCount': 0,
+                'FolderCount': 0,
+                'LastModified': None
+            }
+            
+            paginator = s3_client.get_paginator('list_objects_v2')
+            for page in paginator.paginate(Bucket=bucket_name, Prefix=prefix, Delimiter='/'):
+                for obj in page.get('Contents', []):
+                    subdirectory_info['FileCount'] += 1
+                    if (subdirectory_info['LastModified'] is None or
+                        obj['LastModified'] > subdirectory_info['LastModified']):
+                        subdirectory_info['LastModified'] = obj['LastModified']
+
+                for sub_prefix in page.get('CommonPrefixes', []):
+                    subdirectory_info['FolderCount'] += 1
+                    
+            folders.append(subdirectory_info)
+
+
+        for obj in response.get('Contents', []):
+            file_info = {
+                'Key': obj['Key'],
+                'LastModified': obj['LastModified']
+            }
+            files.append(file_info)
 
         folders_count=len(folders)
+        files_count=len(files)
+
         return JsonResponse({'folders': folders,
-                             'folder_count':folders_count
+                             'files': files,
+                             'folder_count':folders_count,
+                             'files_count':files_count
                              })
     except Exception as e:
         return JsonResponse({'error': str(e)}, status=500)
