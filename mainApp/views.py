@@ -42,6 +42,7 @@ def list_folders(request):
     
     try:
         response = s3_client.list_objects_v2(Bucket=bucket_name, Delimiter='/')
+        
         # print(response)
         folders = []
         files= []
@@ -90,34 +91,49 @@ def list_folders(request):
 
 
 
+from datetime import datetime
+
 def list_files(request, folder_id):
     s3_client = get_s3_client()
     bucket_name = os.getenv('AWS_STORAGE_BUCKET_NAME')
     
     try:
-        folder_key = folder_id + '/'
+        folder_key = folder_id.rstrip('/') + '/'
         
+        response = s3_client.list_objects_v2(Bucket=bucket_name, Prefix=folder_key, Delimiter='/')
         
-        response = s3_client.list_objects_v2(Bucket=bucket_name, Prefix=folder_key)
         files = []
+        folders = []
+        
         for obj in response.get('Contents', []):
             if obj['Key'] != folder_key:
-             files.append({
-                'Key': obj['Key'],
-                'LastModified': obj['LastModified']
+                files.append({
+                    'Key': obj['Key'],
+                    'LastModified': obj['LastModified']
+                })
+        
+        for common_prefix in response.get('CommonPrefixes', []):
+            folders.append({
+                'Key': common_prefix['Prefix'],
+                'LastModified': None  # Folder last modified times are not directly available
             })
         
-        
         file_count = len(files)
+        folder_count = len(folders)
         
         return JsonResponse({
             'folder_id': folder_id,
             'files': files,
-            'file_count': file_count
+            'folders': folders,
+            'file_count': file_count,
+            'folder_count': folder_count
         })
     
     except Exception as e:
         return JsonResponse({'error': str(e)}, status=500)
+
+
+
     
 
 @csrf_exempt
@@ -154,14 +170,16 @@ def delete_file(request, folder_id, file_name):
 def create_folder(request):
     if request.method == 'POST':
         folder_name = request.POST.get('folder_name')
-        folder_key = folder_name.rstrip('/') + '/'
-        
+        folder_key = folder_name.rstrip('/') + '/'  # Ensure the folder key ends with '/'
+
         try:
             s3_client = get_s3_client()
+            # Create an empty object with the folder key to simulate folder creation
             s3_client.put_object(Bucket=os.getenv('AWS_STORAGE_BUCKET_NAME'), Key=folder_key)
             return JsonResponse({'message': 'Folder created successfully'}, status=200)
         except (NoCredentialsError, PartialCredentialsError) as e:
             return JsonResponse({'error': str(e)}, status=403)
         except Exception as e:
             return JsonResponse({'error': str(e)}, status=500)
-    return JsonResponse({'error': 'Invalid request'}, status=400)       
+    return JsonResponse({'error': 'Invalid request'}, status=400)
+       
