@@ -42,7 +42,8 @@ def list_folders(request):
     
     try:
         response = s3_client.list_objects_v2(Bucket=bucket_name, Delimiter='/')
-        # print(response)
+        
+        
         folders = []
         files= []
         
@@ -58,8 +59,9 @@ def list_folders(request):
             paginator = s3_client.get_paginator('list_objects_v2')
             for page in paginator.paginate(Bucket=bucket_name, Prefix=prefix, Delimiter='/'):
                 for obj in page.get('Contents', []):
-                    subdirectory_info['FileCount'] += 1
-                    if (subdirectory_info['LastModified'] is None or
+                    if not obj['Key'].endswith('/'): 
+                     subdirectory_info['FileCount'] += 1
+                     if (subdirectory_info['LastModified'] is None or
                         obj['LastModified'] > subdirectory_info['LastModified']):
                         subdirectory_info['LastModified'] = obj['LastModified']
 
@@ -95,30 +97,59 @@ def list_files(request, folder_id):
     bucket_name = os.getenv('AWS_STORAGE_BUCKET_NAME')
     
     try:
-        folder_key = folder_id + '/'
+        folder_key = folder_id.rstrip('/') + '/'
         
+        response = s3_client.list_objects_v2(Bucket=bucket_name, Prefix=folder_key, Delimiter='/')
         
-        response = s3_client.list_objects_v2(Bucket=bucket_name, Prefix=folder_key)
         files = []
+        folders = []
+        
         for obj in response.get('Contents', []):
             if obj['Key'] != folder_key:
-             files.append({
-                'Key': obj['Key'],
-                'LastModified': obj['LastModified']
+                files.append({
+                    'Key': obj['Key'],
+                    'LastModified': obj['LastModified']
+                })
+        
+        for common_prefix in response.get('CommonPrefixes', []):
+            subfolder_key = common_prefix['Prefix']
+            
+            
+            file_count = 0
+            folder_count = 0
+            last_modified = None
+            
+            paginator = s3_client.get_paginator('list_objects_v2')
+            for page in paginator.paginate(Bucket=bucket_name, Prefix=subfolder_key, Delimiter='/'):
+                for obj in page.get('Contents', []):
+                    if obj['Key'] != subfolder_key:  # this avoids folder to be counted as a file
+                        file_count += 1
+                        if last_modified is None or obj['LastModified'] > last_modified:
+                            last_modified = obj['LastModified']
+                
+                for sub_prefix in page.get('CommonPrefixes', []):
+                    folder_count += 1
+            
+            folders.append({
+                'folderName': subfolder_key,
+                'FileCount': file_count,
+                'FolderCount': folder_count,
+                'LastModified': last_modified
             })
         
-        
         file_count = len(files)
+        folder_count = len(folders)
         
         return JsonResponse({
             'folder_id': folder_id,
             'files': files,
-            'file_count': file_count
+            'folders': folders,
+            'file_count': file_count,
+            'folder_count': folder_count
         })
     
     except Exception as e:
         return JsonResponse({'error': str(e)}, status=500)
-    
 
 @csrf_exempt
 def upload_file(request):
@@ -153,9 +184,14 @@ def delete_file(request, folder_id, file_name):
 @csrf_exempt
 def create_folder(request):
     if request.method == 'POST':
+        parent_folder = request.POST.get('parent_folder', '')
         folder_name = request.POST.get('folder_name')
-        folder_key = folder_name.rstrip('/') + '/'
+        if not folder_name:
+            return JsonResponse({'error': 'Folder name is required'}, status=400)
+
         
+        folder_key = os.path.join(parent_folder, folder_name).rstrip('/') + '/'
+
         try:
             s3_client = get_s3_client()
             s3_client.put_object(Bucket=os.getenv('AWS_STORAGE_BUCKET_NAME'), Key=folder_key)
@@ -164,4 +200,5 @@ def create_folder(request):
             return JsonResponse({'error': str(e)}, status=403)
         except Exception as e:
             return JsonResponse({'error': str(e)}, status=500)
-    return JsonResponse({'error': 'Invalid request'}, status=400)       
+    return JsonResponse({'error': 'Invalid request'}, status=400)
+       
