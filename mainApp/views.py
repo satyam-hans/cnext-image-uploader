@@ -49,7 +49,7 @@ def list_folders(request):
         for common_prefix in response.get('CommonPrefixes', []):
             prefix = common_prefix['Prefix']
             subdirectory_info = {
-                'Prefix': prefix,
+                'folderName': prefix,
                 'FileCount': 0,
                 'FolderCount': 0,
                 'LastModified': None
@@ -71,7 +71,7 @@ def list_folders(request):
 
         for obj in response.get('Contents', []):
             file_info = {
-                'Key': obj['Key'],
+                'fileName': obj['Key'],
                 'LastModified': obj['LastModified']
             }
             files.append(file_info)
@@ -99,7 +99,6 @@ def list_files(request, folder_id):
         
         
         response = s3_client.list_objects_v2(Bucket=bucket_name, Prefix=folder_key)
-        
         files = []
         for obj in response.get('Contents', []):
             if obj['Key'] != folder_key:
