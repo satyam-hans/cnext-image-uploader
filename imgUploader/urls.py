@@ -12,7 +12,7 @@ urlpatterns = [
 
 
     path('list-folders/', views.list_folders, name='list-folders'),
-    path('list-files/<str:folder_id>/', views.list_files, name='list-files'),
+    path('list-files/<path:folder_id>/', views.list_files, name='list-files'),
     path('upload-file/', views.upload_file, name='upload-file'),
     path('delete-file/<str:folder_id>/<str:file_name>/', views.delete_file, name='delete-file'),
     path('create-folder/', views.create_folder, name='create-folder'),

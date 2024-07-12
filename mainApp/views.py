@@ -43,7 +43,7 @@ def list_folders(request):
     try:
         response = s3_client.list_objects_v2(Bucket=bucket_name, Delimiter='/')
         
-        # print(response)
+        
         folders = []
         files= []
         
@@ -59,8 +59,9 @@ def list_folders(request):
             paginator = s3_client.get_paginator('list_objects_v2')
             for page in paginator.paginate(Bucket=bucket_name, Prefix=prefix, Delimiter='/'):
                 for obj in page.get('Contents', []):
-                    subdirectory_info['FileCount'] += 1
-                    if (subdirectory_info['LastModified'] is None or
+                    if not obj['Key'].endswith('/'): 
+                     subdirectory_info['FileCount'] += 1
+                     if (subdirectory_info['LastModified'] is None or
                         obj['LastModified'] > subdirectory_info['LastModified']):
                         subdirectory_info['LastModified'] = obj['LastModified']
 
@@ -91,8 +92,6 @@ def list_folders(request):
 
 
 
-from datetime import datetime
-
 def list_files(request, folder_id):
     s3_client = get_s3_client()
     bucket_name = os.getenv('AWS_STORAGE_BUCKET_NAME')
@@ -113,9 +112,29 @@ def list_files(request, folder_id):
                 })
         
         for common_prefix in response.get('CommonPrefixes', []):
+            subfolder_key = common_prefix['Prefix']
+            
+            
+            file_count = 0
+            folder_count = 0
+            last_modified = None
+            
+            paginator = s3_client.get_paginator('list_objects_v2')
+            for page in paginator.paginate(Bucket=bucket_name, Prefix=subfolder_key, Delimiter='/'):
+                for obj in page.get('Contents', []):
+                    if obj['Key'] != subfolder_key:  # this avoids folder to be counted as a file
+                        file_count += 1
+                        if last_modified is None or obj['LastModified'] > last_modified:
+                            last_modified = obj['LastModified']
+                
+                for sub_prefix in page.get('CommonPrefixes', []):
+                    folder_count += 1
+            
             folders.append({
-                'Key': common_prefix['Prefix'],
-                'LastModified': None  # Folder last modified times are not directly available
+                'folderName': subfolder_key,
+                'FileCount': file_count,
+                'FolderCount': folder_count,
+                'LastModified': last_modified
             })
         
         file_count = len(files)
@@ -131,10 +150,6 @@ def list_files(request, folder_id):
     
     except Exception as e:
         return JsonResponse({'error': str(e)}, status=500)
-
-
-
-    
 
 @csrf_exempt
 def upload_file(request):
@@ -169,12 +184,16 @@ def delete_file(request, folder_id, file_name):
 @csrf_exempt
 def create_folder(request):
     if request.method == 'POST':
+        parent_folder = request.POST.get('parent_folder', '')
         folder_name = request.POST.get('folder_name')
-        folder_key = folder_name.rstrip('/') + '/'  # Ensure the folder key ends with '/'
+        if not folder_name:
+            return JsonResponse({'error': 'Folder name is required'}, status=400)
+
+        
+        folder_key = os.path.join(parent_folder, folder_name).rstrip('/') + '/'
 
         try:
             s3_client = get_s3_client()
-            # Create an empty object with the folder key to simulate folder creation
             s3_client.put_object(Bucket=os.getenv('AWS_STORAGE_BUCKET_NAME'), Key=folder_key)
             return JsonResponse({'message': 'Folder created successfully'}, status=200)
         except (NoCredentialsError, PartialCredentialsError) as e:
