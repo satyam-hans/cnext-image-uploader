@@ -95,6 +95,7 @@ def list_folders(request):
 def list_files(request, folder_id):
     s3_client = get_s3_client()
     bucket_name = os.getenv('AWS_STORAGE_BUCKET_NAME')
+    bucket_region = os.getenv('AWS_DEFAULT_REGION')  # Assuming you have AWS region configured
     
     try:
         folder_key = folder_id.rstrip('/') + '/'
@@ -106,14 +107,15 @@ def list_files(request, folder_id):
         
         for obj in response.get('Contents', []):
             if obj['Key'] != folder_key:
-                files.append({
+                file_info = {
                     'Key': obj['Key'],
-                    'LastModified': obj['LastModified']
-                })
+                    'LastModified': obj['LastModified'],
+                    'URL': f'http://{bucket_name}.s3.{bucket_region}.amazonaws.com/{obj["Key"]}'
+                }
+                files.append(file_info)
         
         for common_prefix in response.get('CommonPrefixes', []):
             subfolder_key = common_prefix['Prefix']
-            
             
             file_count = 0
             folder_count = 0
@@ -151,6 +153,7 @@ def list_files(request, folder_id):
     except Exception as e:
         return JsonResponse({'error': str(e)}, status=500)
 
+
 @csrf_exempt
 def upload_file(request):
     if request.method == 'POST' and request.FILES['file']:
@@ -169,17 +172,32 @@ def upload_file(request):
     return JsonResponse({'error': 'Invalid request'}, status=400)
 
 @csrf_exempt
-def delete_file(request, folder_id, file_name):
-    file_key = os.path.join(folder_id, file_name)
+def delete_file(request, folder_id, file_name=None):
+    s3_client = get_s3_client()
+    bucket_name = os.getenv('AWS_STORAGE_BUCKET_NAME')
+    
     try:
-        bucket_name = os.getenv('AWS_STORAGE_BUCKET_NAME')
-        s3_client = get_s3_client()
-        s3_client.delete_object(Bucket=bucket_name, Key=file_key)
-        return JsonResponse({'message': 'File deleted successfully'}, status=200)
+        if file_name:
+            # for single file
+            file_key = os.path.join(folder_id, file_name)
+            s3_client.delete_object(Bucket=bucket_name, Key=file_key)
+            return JsonResponse({'message': 'File deleted successfully'}, status=200)
+        else:
+            # for folder and all its contents
+            folder_key = folder_id.rstrip('/') + '/'
+            objects_to_delete = s3_client.list_objects_v2(Bucket=bucket_name, Prefix=folder_key)
+            
+            if 'Contents' in objects_to_delete:
+                delete_keys = [{'Key': obj['Key']} for obj in objects_to_delete['Contents']]
+                s3_client.delete_objects(Bucket=bucket_name, Delete={'Objects': delete_keys})
+                return JsonResponse({'message': 'Folder and all its contents deleted successfully'}, status=200)
+            else:
+                return JsonResponse({'error': 'Folder not found or empty'}, status=404)
     except (NoCredentialsError, PartialCredentialsError) as e:
         return JsonResponse({'error': str(e)}, status=403)
     except Exception as e:
         return JsonResponse({'error': str(e)}, status=500)
+
 
 @csrf_exempt
 def create_folder(request):
