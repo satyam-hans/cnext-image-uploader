@@ -110,7 +110,7 @@ def list_files(request, folder_id):
                 file_info = {
                     'Key': obj['Key'],
                     'LastModified': obj['LastModified'],
-                    'URL': f'http://{bucket_name}.s3.{bucket_region}.amazonaws.com/{obj["Key"]}'
+                    'URL': f'https://{bucket_name}.s3.{bucket_region}.amazonaws.com/{obj["Key"]}'
                 }
                 files.append(file_info)
         

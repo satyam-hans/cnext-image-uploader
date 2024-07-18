@@ -31,7 +31,10 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     'social_django',
     'mainApp',
+    'corsheaders',
+
 ]
+CORS_ALLOW_ALL_ORIGINS=True
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
@@ -43,6 +46,7 @@ MIDDLEWARE = [
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
     'social_django.middleware.SocialAuthExceptionMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
+    'corsheaders.middleware.CorsMiddleware',
 ]
 
 ROOT_URLCONF = 'imgUploader.urls'
