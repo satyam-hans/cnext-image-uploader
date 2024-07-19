@@ -2,3 +2,5 @@
 /.env
 minio.deb
 db.sqlite3
+
+venv
