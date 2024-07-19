@@ -159,10 +159,18 @@ def upload_file(request):
     if request.method == 'POST' and request.FILES['file']:
         folder_id = request.POST.get('folder_id')
         file = request.FILES['file']
-        file_key = os.path.join(folder_id, file.name)
+        file_name=request.POST.get('file_name',file.name)
+        print(file_name)
+        file_key = os.path.join(folder_id, file_name)
         try:
             bucket_name = os.getenv('AWS_STORAGE_BUCKET_NAME')
             s3_client = get_s3_client()
+
+            existing_files=s3_client.list_objects_v2(Bucket=bucket_name,Prefix=file_key)
+            if 'Contents' in existing_files:
+                return JsonResponse({'error': 'A file with the same name already exists'}, status=400)
+
+
             s3_client.upload_fileobj(file, bucket_name, file_key)
             return JsonResponse({'message': 'File uploaded successfully'}, status=200)
         except (NoCredentialsError, PartialCredentialsError) as e:
