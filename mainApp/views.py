@@ -2,6 +2,7 @@ from django.shortcuts import render, redirect
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth import logout as django_logout
 from django.http import JsonResponse
+from datetime import datetime, timezone, timedelta
 import boto3
 import os
 from botocore.exceptions import NoCredentialsError, PartialCredentialsError
@@ -46,15 +47,17 @@ def list_folders(request):
         
         folders = []
         files= []
-        
         for common_prefix in response.get('CommonPrefixes', []):
             prefix = common_prefix['Prefix']
+            folder_metadata = s3_client.head_object(Bucket=bucket_name, Key=prefix)['Metadata']
+            created_at = folder_metadata.get('createdat')
             subdirectory_info = {
                 'folderName': prefix,
                 'FileCount': 0,
                 'FolderCount': 0,
-                'LastModified': None
+                'LastModified': created_at
             }
+        
             
             paginator = s3_client.get_paginator('list_objects_v2')
             for page in paginator.paginate(Bucket=bucket_name, Prefix=prefix, Delimiter='/'):
@@ -66,8 +69,7 @@ def list_folders(request):
                         subdirectory_info['LastModified'] = obj['LastModified']
 
                 for sub_prefix in page.get('CommonPrefixes', []):
-                    subdirectory_info['FolderCount'] += 1
-                    
+                    subdirectory_info['FolderCount'] += 1     
             folders.append(subdirectory_info)
 
 
@@ -95,7 +97,7 @@ def list_folders(request):
 def list_files(request, folder_id):
     s3_client = get_s3_client()
     bucket_name = os.getenv('AWS_STORAGE_BUCKET_NAME')
-    bucket_region = os.getenv('AWS_DEFAULT_REGION')  # Assuming you have AWS region configured
+    bucket_region = os.getenv('AWS_DEFAULT_REGION')
     
     try:
         folder_key = folder_id.rstrip('/') + '/'
@@ -116,15 +118,16 @@ def list_files(request, folder_id):
         
         for common_prefix in response.get('CommonPrefixes', []):
             subfolder_key = common_prefix['Prefix']
-            
+            folder_metadata = s3_client.head_object(Bucket=bucket_name, Key=subfolder_key)['Metadata']
+            created_at = folder_metadata.get('createdat')
             file_count = 0
             folder_count = 0
-            last_modified = None
+            last_modified = created_at
             
             paginator = s3_client.get_paginator('list_objects_v2')
             for page in paginator.paginate(Bucket=bucket_name, Prefix=subfolder_key, Delimiter='/'):
                 for obj in page.get('Contents', []):
-                    if obj['Key'] != subfolder_key:  # this avoids folder to be counted as a file
+                    if obj['Key'] != subfolder_key:
                         file_count += 1
                         if last_modified is None or obj['LastModified'] > last_modified:
                             last_modified = obj['LastModified']
@@ -220,7 +223,9 @@ def create_folder(request):
 
         try:
             s3_client = get_s3_client()
-            s3_client.put_object(Bucket=os.getenv('AWS_STORAGE_BUCKET_NAME'), Key=folder_key)
+            created_at = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S%z')
+            created_at = created_at[:-2] + ':' + created_at[-2:]
+            s3_client.put_object(Bucket=os.getenv('AWS_STORAGE_BUCKET_NAME'), Key=folder_key, Metadata={'createdAt': created_at})
             return JsonResponse({'message': 'Folder created successfully'}, status=200)
         except (NoCredentialsError, PartialCredentialsError) as e:
             return JsonResponse({'error': str(e)}, status=403)
