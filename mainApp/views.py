@@ -44,13 +44,15 @@ def list_folders(request):
     try:
         response = s3_client.list_objects_v2(Bucket=bucket_name, Delimiter='/')
         
-        
         folders = []
         files= []
         for common_prefix in response.get('CommonPrefixes', []):
             prefix = common_prefix['Prefix']
-            folder_metadata = s3_client.head_object(Bucket=bucket_name, Key=prefix)['Metadata']
-            created_at = folder_metadata.get('createdat')
+            try:
+                folder_metadata = s3_client.head_object(Bucket=bucket_name, Key=prefix)['Metadata']
+                created_at = folder_metadata.get('createdat')
+            except s3_client.exceptions.ClientError as e:
+                created_at = None
             subdirectory_info = {
                 'folderName': prefix,
                 'FileCount': 0,
@@ -72,7 +74,7 @@ def list_folders(request):
                     subdirectory_info['FolderCount'] += 1     
             folders.append(subdirectory_info)
 
-
+        
         for obj in response.get('Contents', []):
             file_info = {
                 'fileName': obj['Key'],
@@ -118,8 +120,12 @@ def list_files(request, folder_id):
         
         for common_prefix in response.get('CommonPrefixes', []):
             subfolder_key = common_prefix['Prefix']
-            folder_metadata = s3_client.head_object(Bucket=bucket_name, Key=subfolder_key)['Metadata']
-            created_at = folder_metadata.get('createdat')
+            try:
+                folder_metadata = s3_client.head_object(Bucket=bucket_name, Key=subfolder_key)['Metadata']
+                created_at = folder_metadata.get('createdat')
+            except s3_client.exceptions.ClientError as e:
+                created_at= None
+                
             file_count = 0
             folder_count = 0
             last_modified = created_at
