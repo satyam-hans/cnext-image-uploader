@@ -8,6 +8,7 @@ import os
 from botocore.exceptions import NoCredentialsError, PartialCredentialsError
 from django.views.decorators.csrf import csrf_exempt
 from django.utils.dateparse import parse_datetime
+import pytz
 
 
 from dotenv import load_dotenv
@@ -36,6 +37,17 @@ def get_s3_client():
         region_name=os.getenv('AWS_DEFAULT_REGION')
     )
 
+def parse_date(date_str):
+    for fmt in ('%Y-%m-%d %H:%M:%S%z', '%Y-%m-%dT%H:%M:%S.%fZ'):
+        try:
+            date = datetime.strptime(date_str, fmt)
+            if date.tzinfo is None:
+                date = date.replace(tzinfo=pytz.UTC)
+            return date
+        except ValueError:
+            continue
+    return None
+
 def list_folders(request):
     s3_client=get_s3_client()
     
@@ -51,6 +63,8 @@ def list_folders(request):
             try:
                 folder_metadata = s3_client.head_object(Bucket=bucket_name, Key=prefix)['Metadata']
                 created_at = folder_metadata.get('createdat')
+                if created_at:
+                    created_at = parse_date(created_at)
             except s3_client.exceptions.ClientError as e:
                 created_at = None
             subdirectory_info = {
@@ -81,6 +95,9 @@ def list_folders(request):
                 'LastModified': obj['LastModified']
             }
             files.append(file_info)
+
+        folders = sorted(folders, key=lambda x: (x['LastModified'] if x['LastModified'] is not None else datetime.min.replace(tzinfo=pytz.UTC)), reverse=True)
+        files = sorted(files, key=lambda x: (x['LastModified'] if x['LastModified'] is not None else datetime.min.replace(tzinfo=pytz.UTC)), reverse=True)
 
         folders_count=len(folders)
         files_count=len(files)
@@ -123,6 +140,8 @@ def list_files(request, folder_id):
             try:
                 folder_metadata = s3_client.head_object(Bucket=bucket_name, Key=subfolder_key)['Metadata']
                 created_at = folder_metadata.get('createdat')
+                if created_at:
+                    created_at = parse_date(created_at)
             except s3_client.exceptions.ClientError as e:
                 created_at= None
                 
@@ -147,6 +166,9 @@ def list_files(request, folder_id):
                 'FolderCount': folder_count,
                 'LastModified': last_modified
             })
+        
+        files = sorted(files, key=lambda x: (x['LastModified'] if x['LastModified'] is not None else datetime.min.replace(tzinfo=pytz.UTC)), reverse=True)
+        folders = sorted(folders, key=lambda x: (x['LastModified'] if x['LastModified'] is not None else datetime.min.replace(tzinfo=pytz.UTC)), reverse=True)
         
         file_count = len(files)
         folder_count = len(folders)
