@@ -17,5 +17,5 @@ urlpatterns = [
     path('delete-file/<str:folder_id>/<str:file_name>/', views.delete_file, name='delete-file'),
     path('create-folder/', views.create_folder, name='create-folder'),
 
-    path('google-login/', views.google_login, name='google_login'),
+    path('api/google-login/', views.google_login, name='google_login'),
 ]
