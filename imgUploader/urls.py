@@ -5,10 +5,10 @@ from mainApp import views
 
 urlpatterns = [
     path('admin/', admin.site.urls),
-    path('login/', views.login, name='login'),
-    path('logout/', views.logout, name='logout'),
+    # path('login/', views.login, name='login'),
+    # path('logout/', views.logout, name='logout'),
     path('social-auth/', include('social_django.urls', namespace='social')),
-    path("", views.home, name='home'),
+    # path("", views.home, name='home'),
 
 
     path('list-folders/', views.list_folders, name='list-folders'),
@@ -16,4 +16,6 @@ urlpatterns = [
     path('upload-file/', views.upload_file, name='upload-file'),
     path('delete-file/<str:folder_id>/<str:file_name>/', views.delete_file, name='delete-file'),
     path('create-folder/', views.create_folder, name='create-folder'),
+
+    path('google-login/', views.google_login, name='google_login'),
 ]

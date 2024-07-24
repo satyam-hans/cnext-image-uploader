@@ -9,24 +9,79 @@ from botocore.exceptions import NoCredentialsError, PartialCredentialsError
 from django.views.decorators.csrf import csrf_exempt
 from django.utils.dateparse import parse_datetime
 import pytz
+import logging
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import AllowAny
+from rest_framework.response import Response
+import requests
+from django.conf import settings
 
 
 from dotenv import load_dotenv
 load_dotenv()
 
-def login(request):
-    return render(request,'login.html')
+logger = logging.getLogger(__name__)
 
-@login_required
-def home(request):
-    return render(request,'home.html')
-
-
-def logout(request):
-    django_logout(request)
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def google_login(request):
+    token = request.data.get('token')
     
-    request.session.flush()
-    return redirect('login')
+    if not token:
+        logger.error('No token provided')
+        return Response({'success': False, 'error': 'No token provided'}, status=400)
+
+    try:
+        response = requests.get(f'https://www.googleapis.com/oauth2/v3/tokeninfo?access_token={token}')
+        
+        if response.status_code != 200:
+            logger.error(f'Invalid token: {response.json()}')
+            return Response({'success': False, 'error': f'Invalid token: {response.json()}'}, status=400)
+        
+        idinfo = response.json()
+        
+        if idinfo['aud'] != settings.GOOGLE_OAUTH2_CLIENT_ID:
+            logger.error(f'Wrong audience: {idinfo["aud"]}')
+            return Response({'success': False, 'error': 'Wrong audience'}, status=400)
+        email = idinfo['email']
+        name = idinfo.get('name', '')
+        return Response({
+            'success': True,
+            'token': token,
+            'user': {
+                'email': email,
+                'name': name
+            }
+        })
+    except ValueError as e:
+        logger.error(f'Invalid token: {str(e)}')
+        return Response({'success': False, 'error': f'Invalid token: {str(e)}'}, status=400)
+    except Exception as e:
+        logger.error(f'Unexpected error: {str(e)}')
+        return Response({'success': False, 'error': f'Unexpected error: {str(e)}'}, status=400)
+    
+    
+    
+    
+
+@api_view(['GET'])
+def protected_view(request):
+    user_info = request.user_info
+    return Response({'success': True, 'user': user_info})
+
+# def login(request):
+#     return render(request,'login.html')
+
+# @login_required
+# def home(request):
+#     return render(request,'home.html')
+
+
+# def logout(request):
+#     django_logout(request)
+    
+#     request.session.flush()
+#     return redirect('login')
 
 def get_s3_client():
     return boto3.client(
