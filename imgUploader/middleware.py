@@ -13,7 +13,7 @@ class GoogleAuthMiddleware:
         # Skip authentication for specific endpoints (e.g., login)
         if request.path in ['/api/google-login/']:
             return self.get_response(request)
-
+        
         token = request.headers.get('Authorization')
 
         if not token:
@@ -29,7 +29,7 @@ class GoogleAuthMiddleware:
             idinfo = response.json()
             
             if idinfo['aud'] != settings.GOOGLE_OAUTH2_CLIENT_ID:
-                return JsonResponse({'success': False, 'error': 'Wrong audience'}, status=401)
+                return JsonResponse({'success': False, 'error': 'Unauthorized'}, status=401)
             
             request.user_info = idinfo
         except Exception as e:

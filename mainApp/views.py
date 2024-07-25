@@ -41,8 +41,8 @@ def google_login(request):
         idinfo = response.json()
         
         if idinfo['aud'] != settings.GOOGLE_OAUTH2_CLIENT_ID:
-            logger.error(f'Wrong audience: {idinfo["aud"]}')
-            return Response({'success': False, 'error': 'Wrong audience'}, status=400)
+            logger.error(f'Unauthorized: {idinfo["aud"]}')
+            return Response({'success': False, 'error': 'Unauthorized'}, status=400)
         email = idinfo['email']
         name = idinfo.get('name', '')
         return Response({
