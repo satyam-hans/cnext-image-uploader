@@ -15,6 +15,8 @@ from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 import requests
 from django.conf import settings
+import time
+from concurrent.futures import ThreadPoolExecutor
 
 
 from dotenv import load_dotenv
@@ -103,47 +105,49 @@ def parse_date(date_str):
             continue
     return None
 
+
+
+def process_folder(s3_client, bucket_name, prefix):
+    subdirectory_info = {
+        'folderName': prefix,
+        'FileCount': 0,
+        'FolderCount': 0,
+        'LastModified': None
+    }
+
+    paginator = s3_client.get_paginator('list_objects_v2')
+    for page in paginator.paginate(Bucket=bucket_name, Prefix=prefix, Delimiter='/'):
+        for obj in page.get('Contents', []):
+            if not obj['Key'].endswith('/'):
+                subdirectory_info['FileCount'] += 1
+                if (subdirectory_info['LastModified'] is None or
+                        obj['LastModified'] > subdirectory_info['LastModified']):
+                    subdirectory_info['LastModified'] = obj['LastModified']
+
+        for sub_prefix in page.get('CommonPrefixes', []):
+            subdirectory_info['FolderCount'] += 1
+    return subdirectory_info
+
 def list_folders(request):
-    s3_client=get_s3_client()
-    
+    start = time.time()
+
+    s3_client = get_s3_client()
     bucket_name = os.getenv('AWS_STORAGE_BUCKET_NAME')
-    
+
     try:
         response = s3_client.list_objects_v2(Bucket=bucket_name, Delimiter='/')
-        
+
         folders = []
-        files= []
-        for common_prefix in response.get('CommonPrefixes', []):
-            prefix = common_prefix['Prefix']
-            try:
-                folder_metadata = s3_client.head_object(Bucket=bucket_name, Key=prefix)['Metadata']
-                created_at = folder_metadata.get('createdat')
-                if created_at:
-                    created_at = parse_date(created_at)
-            except s3_client.exceptions.ClientError as e:
-                created_at = None
-            subdirectory_info = {
-                'folderName': prefix,
-                'FileCount': 0,
-                'FolderCount': 0,
-                'LastModified': created_at
-            }
-        
-            
-            paginator = s3_client.get_paginator('list_objects_v2')
-            for page in paginator.paginate(Bucket=bucket_name, Prefix=prefix, Delimiter='/'):
-                for obj in page.get('Contents', []):
-                    if not obj['Key'].endswith('/'): 
-                     subdirectory_info['FileCount'] += 1
-                     if (subdirectory_info['LastModified'] is None or
-                        obj['LastModified'] > subdirectory_info['LastModified']):
-                        subdirectory_info['LastModified'] = obj['LastModified']
+        files = []
 
-                for sub_prefix in page.get('CommonPrefixes', []):
-                    subdirectory_info['FolderCount'] += 1     
-            folders.append(subdirectory_info)
+        # Process folders concurrently
+        common_prefixes = response.get('CommonPrefixes', [])
+        with ThreadPoolExecutor() as executor:
+            folder_futures = [executor.submit(process_folder, s3_client, bucket_name, cp['Prefix']) for cp in common_prefixes]
+            for future in folder_futures:
+                folders.append(future.result())
 
-        
+        # Process files
         for obj in response.get('Contents', []):
             file_info = {
                 'fileName': obj['Key'],
@@ -154,25 +158,39 @@ def list_folders(request):
         folders = sorted(folders, key=lambda x: (x['LastModified'] if x['LastModified'] is not None else datetime.min.replace(tzinfo=pytz.UTC)), reverse=True)
         files = sorted(files, key=lambda x: (x['LastModified'] if x['LastModified'] is not None else datetime.min.replace(tzinfo=pytz.UTC)), reverse=True)
 
-        folders_count=len(folders)
-        files_count=len(files)
+        folders_count = len(folders)
+        files_count = len(files)
 
-        return JsonResponse({'folders': folders,
-                             'files': files,
-                             'folder_count':folders_count,
-                             'files_count':files_count
-                             })
+        return JsonResponse({
+            'folders': folders,
+            'files': files,
+            'folder_count': folders_count,
+            'files_count': files_count
+        })
     except Exception as e:
         return JsonResponse({'error': str(e)}, status=500)
-    
 
+def process_subfolder_page(page):
+    file_count = 0
+    folder_count = 0
+    last_modified = None
 
+    for obj in page.get('Contents', []):
+        if not obj['Key'].endswith('/'):
+            file_count += 1
+            if last_modified is None or obj['LastModified'] > last_modified:
+                last_modified = obj['LastModified']
+
+    for sub_prefix in page.get('CommonPrefixes', []):
+        folder_count += 1
+
+    return file_count, folder_count, last_modified
 
 def list_files(request, folder_id):
     s3_client = get_s3_client()
     bucket_name = os.getenv('AWS_STORAGE_BUCKET_NAME')
     bucket_region = os.getenv('AWS_DEFAULT_REGION')
-    
+
     try:
         folder_key = folder_id.rstrip('/') + '/'
         
@@ -180,7 +198,7 @@ def list_files(request, folder_id):
         
         files = []
         folders = []
-        
+
         for obj in response.get('Contents', []):
             if obj['Key'] != folder_key:
                 file_info = {
@@ -189,45 +207,39 @@ def list_files(request, folder_id):
                     'URL': f'https://{bucket_name}.s3.{bucket_region}.amazonaws.com/{obj["Key"]}'
                 }
                 files.append(file_info)
-        
-        for common_prefix in response.get('CommonPrefixes', []):
+
+        # Process subfolders concurrently
+        def process_common_prefix(common_prefix):
             subfolder_key = common_prefix['Prefix']
-            try:
-                folder_metadata = s3_client.head_object(Bucket=bucket_name, Key=subfolder_key)['Metadata']
-                created_at = folder_metadata.get('createdat')
-                if created_at:
-                    created_at = parse_date(created_at)
-            except s3_client.exceptions.ClientError as e:
-                created_at= None
-                
+            paginator = s3_client.get_paginator('list_objects_v2')
+            subfolder_pages = paginator.paginate(Bucket=bucket_name, Prefix=subfolder_key, Delimiter='/')
             file_count = 0
             folder_count = 0
-            last_modified = created_at
-            
-            paginator = s3_client.get_paginator('list_objects_v2')
-            for page in paginator.paginate(Bucket=bucket_name, Prefix=subfolder_key, Delimiter='/'):
-                for obj in page.get('Contents', []):
-                    if obj['Key'] != subfolder_key:
-                        file_count += 1
-                        if last_modified is None or obj['LastModified'] > last_modified:
-                            last_modified = obj['LastModified']
-                
-                for sub_prefix in page.get('CommonPrefixes', []):
-                    folder_count += 1
-            
-            folders.append({
+            last_modified = None
+            for page in subfolder_pages:
+                page_file_count, page_folder_count, page_last_modified = process_subfolder_page(page)
+                file_count += page_file_count
+                folder_count += page_folder_count
+                if last_modified is None or (page_last_modified is not None and page_last_modified > last_modified):
+                    last_modified = page_last_modified
+            return {
                 'folderName': subfolder_key,
                 'FileCount': file_count,
                 'FolderCount': folder_count,
                 'LastModified': last_modified
-            })
+            }
+
+        with ThreadPoolExecutor() as executor:
+            subfolder_results = list(executor.map(process_common_prefix, response.get('CommonPrefixes', [])))
+
+        folders.extend(subfolder_results)
         
         files = sorted(files, key=lambda x: (x['LastModified'] if x['LastModified'] is not None else datetime.min.replace(tzinfo=pytz.UTC)), reverse=True)
         folders = sorted(folders, key=lambda x: (x['LastModified'] if x['LastModified'] is not None else datetime.min.replace(tzinfo=pytz.UTC)), reverse=True)
-        
+
         file_count = len(files)
         folder_count = len(folders)
-        
+
         return JsonResponse({
             'folder_id': folder_id,
             'files': files,
@@ -235,9 +247,10 @@ def list_files(request, folder_id):
             'file_count': file_count,
             'folder_count': folder_count
         })
-    
+
     except Exception as e:
         return JsonResponse({'error': str(e)}, status=500)
+
 
 
 @csrf_exempt
@@ -246,7 +259,6 @@ def upload_file(request):
         folder_id = request.POST.get('folder_id')
         file = request.FILES['file']
         file_name=request.POST.get('file_name',file.name)
-        print(file_name)
         file_key = os.path.join(folder_id, file_name)
         try:
             bucket_name = os.getenv('AWS_STORAGE_BUCKET_NAME')

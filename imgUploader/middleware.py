@@ -21,6 +21,7 @@ class GoogleAuthMiddleware:
 
         try:
             # Verify the token with Google's token info endpoint
+            print(token, ' -token')
             response = requests.get(f'https://www.googleapis.com/oauth2/v3/tokeninfo?access_token={token}')
             
             if response.status_code != 200:
