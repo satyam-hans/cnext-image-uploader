@@ -318,6 +318,10 @@ def create_folder(request):
 
         try:
             s3_client = get_s3_client()
+            bucket_name = os.getenv('AWS_STORAGE_BUCKET_NAME')
+            response = s3_client.list_objects_v2(Bucket=bucket_name, Prefix=folder_key, Delimiter='/')
+            if 'CommonPrefixes' in response or 'Contents' in response:
+                return JsonResponse({'error': 'Folder with the same name already exists'}, status=400)
             created_at = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S%z')
             created_at = created_at[:-2] + ':' + created_at[-2:]
             s3_client.put_object(Bucket=os.getenv('AWS_STORAGE_BUCKET_NAME'), Key=folder_key, Metadata={'createdAt': created_at})
