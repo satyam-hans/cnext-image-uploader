@@ -18,4 +18,5 @@ urlpatterns = [
     path('create-folder/', views.create_folder, name='create-folder'),
 
     path('api/google-login/', views.google_login, name='google_login'),
+    path('api/search/', views.search, name='search'),
 ]

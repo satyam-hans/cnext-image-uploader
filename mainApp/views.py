@@ -17,6 +17,7 @@ import requests
 from django.conf import settings
 import time
 from concurrent.futures import ThreadPoolExecutor
+from botocore.exceptions import NoCredentialsError, PartialCredentialsError
 
 
 from dotenv import load_dotenv
@@ -128,6 +129,56 @@ def process_folder(s3_client, bucket_name, prefix):
             subdirectory_info['FolderCount'] += 1
     return subdirectory_info
 
+@csrf_exempt
+def search(request):
+    if request.method == 'GET':
+        query = request.GET.get('q', '')
+        file_type = request.GET.get('type', None) 
+
+        if not query:
+            return JsonResponse({'error': 'Query parameter is required'}, status=400)
+
+        s3_client = get_s3_client()
+        bucket_name = os.getenv('AWS_STORAGE_BUCKET_NAME')
+
+        try:
+            paginator = s3_client.get_paginator('list_objects_v2')
+            result = {
+                'files': [],
+                'folders': []
+            }
+
+            folders_set = set()
+
+            for page in paginator.paginate(Bucket=bucket_name, Prefix=''):
+                for obj in page.get('Contents', []):
+                    key = obj['Key']
+                    
+                    if query.lower() in key.lower():
+                        
+                        if key.endswith('/'):
+                            
+                            folder_parts = key.strip('/').split('/')
+                            if query.lower() in folder_parts[-1].lower():
+                                result['folders'].append(key)
+                                folders_set.add(key)
+                        else:
+                            if file_type:
+                                if key.lower().endswith(file_type.lower()):
+                                    result['files'].append(key)
+                            else:
+                                result['files'].append(key)
+
+            
+            result['files'] = [file for file in result['files'] if not any(file.startswith(folder) for folder in folders_set)]
+
+            return JsonResponse(result, status=200)
+        except (NoCredentialsError, PartialCredentialsError) as e:
+            return JsonResponse({'error': str(e)}, status=403)
+        except Exception as e:
+            return JsonResponse({'error': str(e)}, status=500)
+
+    return JsonResponse({'error': 'Invalid request method'}, status=400)
 def list_folders(request):
     start = time.time()
 
