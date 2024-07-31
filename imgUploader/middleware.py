@@ -10,7 +10,6 @@ class GoogleAuthMiddleware:
         self.get_response = get_response
 
     def __call__(self, request):
-        # Skip authentication for specific endpoints (e.g., login)
         if request.path in ['/api/google-login/']:
             return self.get_response(request)
         
@@ -20,8 +19,7 @@ class GoogleAuthMiddleware:
             return JsonResponse({'success': False, 'error': 'No token provided'}, status=401)
 
         try:
-            # Verify the token with Google's token info endpoint
-            print(token, ' -token')
+            
             response = requests.get(f'https://www.googleapis.com/oauth2/v3/tokeninfo?access_token={token}')
             
             if response.status_code != 200:

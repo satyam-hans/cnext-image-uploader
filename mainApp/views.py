@@ -72,20 +72,6 @@ def protected_view(request):
     user_info = request.user_info
     return Response({'success': True, 'user': user_info})
 
-# def login(request):
-#     return render(request,'login.html')
-
-# @login_required
-# def home(request):
-#     return render(request,'home.html')
-
-
-# def logout(request):
-#     django_logout(request)
-    
-#     request.session.flush()
-#     return redirect('login')
-
 def get_s3_client():
     return boto3.client(
         's3',
@@ -259,7 +245,6 @@ def list_files(request, folder_id):
                 }
                 files.append(file_info)
 
-        # Process subfolders concurrently
         def process_common_prefix(common_prefix):
             subfolder_key = common_prefix['Prefix']
             paginator = s3_client.get_paginator('list_objects_v2')
