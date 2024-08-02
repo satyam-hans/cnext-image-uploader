@@ -99,7 +99,8 @@ def process_folder(s3_client, bucket_name, prefix):
         'folderName': prefix,
         'FileCount': 0,
         'FolderCount': 0,
-        'LastModified': None
+        'LastModified': None,
+        'CreatedAt': None 
     }
 
     paginator = s3_client.get_paginator('list_objects_v2')
@@ -113,7 +114,20 @@ def process_folder(s3_client, bucket_name, prefix):
 
         for sub_prefix in page.get('CommonPrefixes', []):
             subdirectory_info['FolderCount'] += 1
+
+    try:
+        head_response = s3_client.head_object(Bucket=bucket_name, Key=prefix)
+        created_at = head_response.get('Metadata', {}).get('createdat')
+        if created_at:
+            subdirectory_info['CreatedAt'] = parse_date(created_at)
+    except s3_client.exceptions.ClientError as e:
+        logger.error(f"Error fetching metadata for {prefix}: {e}")
+
+    if subdirectory_info['FileCount'] == 0 and subdirectory_info['FolderCount'] == 0:
+        subdirectory_info['LastModified'] = subdirectory_info['CreatedAt']
+
     return subdirectory_info
+
 
 @csrf_exempt
 def search(request):
@@ -177,14 +191,12 @@ def list_folders(request):
         folders = []
         files = []
 
-        # Process folders concurrently
         common_prefixes = response.get('CommonPrefixes', [])
         with ThreadPoolExecutor() as executor:
             folder_futures = [executor.submit(process_folder, s3_client, bucket_name, cp['Prefix']) for cp in common_prefixes]
             for future in folder_futures:
                 folders.append(future.result())
 
-        # Process files
         for obj in response.get('Contents', []):
             file_info = {
                 'fileName': obj['Key'],
@@ -252,12 +264,25 @@ def list_files(request, folder_id):
             file_count = 0
             folder_count = 0
             last_modified = None
+            created_at = None  
             for page in subfolder_pages:
                 page_file_count, page_folder_count, page_last_modified = process_subfolder_page(page)
                 file_count += page_file_count
                 folder_count += page_folder_count
                 if last_modified is None or (page_last_modified is not None and page_last_modified > last_modified):
                     last_modified = page_last_modified
+            
+            try:
+                head_response = s3_client.head_object(Bucket=bucket_name, Key=subfolder_key)
+                created_at = head_response.get('Metadata', {}).get('createdat')
+                if created_at:
+                    created_at = parse_date(created_at)
+            except s3_client.exceptions.ClientError as e:
+                logger.error(f"Error fetching metadata for {subfolder_key}: {e}")
+
+            if file_count == 0 and folder_count == 0:
+                last_modified = created_at
+
             return {
                 'folderName': subfolder_key,
                 'FileCount': file_count,
@@ -286,6 +311,7 @@ def list_files(request, folder_id):
 
     except Exception as e:
         return JsonResponse({'error': str(e)}, status=500)
+
 
 
 
@@ -320,12 +346,10 @@ def delete_file(request, folder_id, file_name=None):
     
     try:
         if file_name:
-            # for single file
             file_key = os.path.join(folder_id, file_name)
             s3_client.delete_object(Bucket=bucket_name, Key=file_key)
             return JsonResponse({'message': 'File deleted successfully'}, status=200)
         else:
-            # for folder and all its contents
             folder_key = folder_id.rstrip('/') + '/'
             objects_to_delete = s3_client.list_objects_v2(Bucket=bucket_name, Prefix=folder_key)
             
